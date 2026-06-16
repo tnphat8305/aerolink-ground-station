@@ -1,0 +1,258 @@
+HUONG DAN CHI TIET SU DUNG APP AEROLINK DRONE GROUND STATION
+============================================================
+
+1. Chuan bi phan cung
+---------------------
+Can co:
+- PC Windows.
+- Module LoRa ground cam vao PC qua USB/UART.
+- Module LoRa air gan tren drone.
+- Flight controller co cong TELEM/UART chay MAVLink.
+- Drone co GPS neu muon dung GO TO TARGET.
+
+So do ket noi LoRa:
+
+PC -> USB/COM -> LoRa ground -> LoRa air -> UART/TELEM -> Flight Controller
+
+
+2. Chay app
+-----------
+Cach chay:
+1) Dong app cu neu dang mo.
+2) Mo file run_cpp.bat.
+3) Script se build neu can va chay app.
+
+File exe sau build:
+build\DroneAutomationCpp.exe
+
+
+3. Ket noi COM/LoRa
+-------------------
+Trong khu vuc LINK CONFIGURATION:
+
+1) Bam Refresh.
+   App se quet cac cong COM dang co tren PC.
+
+2) Chon COM port cua LoRa.
+   Vi du: COM3, COM5...
+
+3) Chon Baud Rate.
+   Thuong gap:
+   - 57600
+   - 115200
+   - 9600
+
+4) Bam Connect.
+
+Neu thanh cong:
+- Trang thai tren goc phai chuyen Connected hoac Waiting/Healthy.
+- Last Message/Last Heartbeat bat dau cap nhat neu co MAVLink ve.
+
+Neu khong thanh cong:
+- Kiem tra COM co dung khong.
+- Kiem tra module LoRa da cam chua.
+- Kiem tra baud rate.
+- Kiem tra flight controller co gui MAVLink khong.
+
+
+4. Doc trang thai LORA LINK HEALTH
+----------------------------------
+Khu vuc nay giup biet PC co nhan duoc du lieu tu drone khong.
+
+- Health
+  Trang thai tong quat cua link.
+
+- RX Rate
+  So byte moi giay PC nhan tu LoRa.
+  Neu luon 0 B/s, PC khong nhan duoc du lieu.
+
+- TX Rate
+  So byte moi giay PC gui ra LoRa.
+  Khi bam command, TX Rate se tang trong thoi gian ngan.
+
+- Packet Rate
+  So MAVLink packet parse duoc moi giay.
+  Neu RX Rate > 0 nhung Packet Rate = 0, co the baud sai hoac du lieu khong phai MAVLink.
+
+- Last Heartbeat
+  Thoi gian ke tu HEARTBEAT cuoi cung.
+  Neu Never, app chua nhan HEARTBEAT tu flight controller.
+
+- Last Message
+  Thoi gian ke tu MAVLink message cuoi cung.
+
+
+5. Xem telemetry
+----------------
+Khu vuc LIVE TELEMETRY hien:
+
+- Battery
+  Phan tram pin neu flight controller gui SYS_STATUS.
+
+- RSSI
+  Tin hieu radio neu co RADIO_STATUS.
+
+- GPS
+  Vi do/kinh do neu co GPS fix.
+
+- Attitude
+  Roll, pitch, yaw.
+
+- Speed
+  Toc do tu GLOBAL_POSITION_INT.
+
+- Flight Mode
+  Mode bay lay tu HEARTBEAT.
+
+
+6. Lich su vi tri
+-----------------
+Khu vuc POSITION HISTORY se them dong moi moi khi app nhan duoc vi tri GPS.
+
+Bam CLEAR HISTORY de xoa lich su hien tai.
+
+
+7. Event log
+------------
+Khu vuc MAVLINK EVENT LOG hien cac su kien quan trong:
+
+- TX
+  App vua gui lenh ra LoRa/COM.
+
+- COMMAND_ACK
+  Flight controller phan hoi lenh.
+
+- STATUSTEXT
+  Flight controller gui thong bao loi/trang thai.
+
+Vi du:
+- Arm denied
+- GPS fix required
+- Mode change failed
+- Takeoff accepted
+
+
+8. Su dung cac nut dieu khien
+-----------------------------
+Luu y an toan:
+Chi bam cac nut dieu khien khi drone da o khu vuc an toan, co propeller safety va da test link.
+
+8.1. ARM
+
+Gui lenh arm drone.
+
+Dieu kien thuong can:
+- Drone da ket noi.
+- Safety checks dat.
+- GPS/EKF dat neu firmware yeu cau.
+- Throttle/switch an toan.
+
+Sau khi bam ARM:
+- Xem MAVLINK EVENT LOG de biet COMMAND_ACK.
+- Xem STATUSTEXT neu bi tu choi.
+
+
+8.2. TAKE OFF
+
+Gui lenh cat canh.
+
+Altitude lay tu o Altitude trong AUTONOMOUS TARGET.
+Neu o do trong hoac khong hop le, app dung mac dinh 5m.
+
+Dieu kien thuong can:
+- Drone da arm.
+- Mode phu hop.
+- GPS/EKF dat.
+
+
+8.3. LAND
+
+Gui lenh ha canh.
+
+Nen dung khi drone dang bay va can ha canh co dieu khien.
+
+
+8.4. RETURN HOME
+
+Gui lenh ve home/RTL.
+
+Dieu kien:
+- Home position da duoc flight controller thiet lap.
+- GPS tot.
+
+
+8.5. GO TO TARGET
+
+Nhap:
+- Latitude
+- Longitude
+- Altitude
+
+Sau do bam GO TO TARGET.
+
+App se:
+1) Gui SET_MODE sang GUIDED.
+2) Gui SET_POSITION_TARGET_GLOBAL_INT den toa do muc tieu.
+
+Dieu kien:
+- Drone ho tro GUIDED mode.
+- Drone co GPS fix.
+- Drone da arm va dang o trang thai co the bay.
+- Link LoRa du tot.
+
+
+9. Neu bam nut ma khong thay drone phan ung
+-------------------------------------------
+Kiem tra theo thu tu:
+
+1) App da Connected chua?
+2) LORA LINK HEALTH co RX/TX khong?
+3) Packet Rate co lon hon 0 khong?
+4) MAVLINK EVENT LOG co COMMAND_ACK khong?
+5) STATUSTEXT co bao loi khong?
+6) Baud rate dung chua?
+7) TELEM port tren flight controller da cau hinh MAVLink chua?
+8) Drone co GPS fix khong?
+9) Mode GUIDED/RTL co duoc firmware ho tro khong?
+
+
+10. Goi y test an toan
+----------------------
+Thu tu test nen lam:
+
+1) Test khong cam pin dong co/khong lap canh quat.
+2) Connect app va kiem tra HEARTBEAT.
+3) Kiem tra telemetry GPS/attitude.
+4) Bam ARM va xem COMMAND_ACK/STATUSTEXT.
+5) Test LAND/RTH o moi truong mo phong neu co.
+6) Chi test TAKE OFF/GOTO ngoai thuc dia khi da chac chan link on dinh.
+
+
+11. Cac loi thuong gap
+----------------------
+Loi: Khong thay COM
+- Bam Refresh.
+- Kiem tra driver USB-UART.
+- Kiem tra cap USB/module LoRa.
+
+Loi: RX Rate = 0
+- LoRa air khong gui du lieu.
+- Sai wiring UART TX/RX.
+- Sai baud.
+- Flight controller chua gui MAVLink.
+
+Loi: RX Rate > 0 nhung Packet Rate = 0
+- Sai baud.
+- Du lieu khong phai MAVLink.
+- LoRa khong transparent UART.
+- Byte bi loi/mat qua nhieu.
+
+Loi: Packet Rate > 0 nhung Last Heartbeat Never
+- Flight controller khong gui HEARTBEAT.
+- Parser nhan message khac HEARTBEAT.
+- Message HEARTBEAT bi chan/loi.
+
+Loi: COMMAND_ACK bi DENIED/FAILED
+- Flight controller tu choi lenh.
+- Xem STATUSTEXT de biet ly do.
+

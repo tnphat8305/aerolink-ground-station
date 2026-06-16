@@ -1,0 +1,650 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ui version="4.0">
+ <class>DroneControlWidget</class>
+ <widget class="QWidget" name="DroneControlWidget">
+  <property name="minimumSize">
+   <size>
+    <width>800</width>
+    <height>600</height>
+   </size>
+  </property>
+  <property name="windowTitle">
+   <string>Trạm Điều Khiển Drone</string>
+  </property>
+  <property name="styleSheet">
+   <string notr="true">
+QWidget {
+    background-color: #f5f5f5;
+    font-family: "Roboto", "Arial";
+    font-size: 11px;
+    color: #333333;
+}
+QGroupBox {
+    font-weight: bold;
+    font-size: 12px;
+    margin-top: 10px;
+    padding: 10px;
+}
+QGroupBox::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 3px 0 3px;
+}
+QPushButton {
+    color: white;
+    font-weight: bold;
+    border-radius: 3px;
+    padding: 6px 12px;
+}
+QPushButton#btnConnect {
+    background-color: #4CAF50;
+    min-width: 120px;
+    min-height: 35px;
+}
+QPushButton#btnConnect:hover { background-color: #45a049; }
+QPushButton#btnConnect:pressed { background-color: #3d8b40; }
+QPushButton#btnArm { background-color: #FF9800; min-width: 150px; min-height: 40px; }
+QPushButton#btnArm:hover { background-color: #FB8C00; }
+QPushButton#btnArm:pressed { background-color: #F57C00; }
+QPushButton#btnTakeoff { background-color: #2196F3; min-width: 150px; min-height: 40px; }
+QPushButton#btnTakeoff:hover { background-color: #1976D2; }
+QPushButton#btnTakeoff:pressed { background-color: #1565C0; }
+QPushButton#btnLand { background-color: #F44336; min-width: 150px; min-height: 40px; }
+QPushButton#btnLand:hover { background-color: #DA190B; }
+QPushButton#btnLand:pressed { background-color: #B71C1C; }
+QPushButton#btnRTH { background-color: #9C27B0; min-width: 150px; min-height: 40px; }
+QPushButton#btnRTH:hover { background-color: #7B1FA2; }
+QPushButton#btnRTH:pressed { background-color: #6A1B9A; }
+QPushButton#btnGoToTarget { background-color: #009688; min-width: 160px; min-height: 36px; }
+QPushButton#btnGoToTarget:hover { background-color: #00897B; }
+QPushButton#btnGoToTarget:pressed { background-color: #00796B; }
+QPushButton#btnClearHistory { background-color: #607D8B; min-width: 120px; min-height: 30px; }
+QPushButton#btnClearHistory:hover { background-color: #546E7A; }
+QPushButton#btnClearHistory:pressed { background-color: #455A64; }
+QPushButton:disabled { opacity: 0.5; }
+QSlider::groove:horizontal {
+    height: 8px;
+    border: 1px solid #999999;
+    border-radius: 4px;
+}
+QSlider::handle:horizontal {
+    width: 16px;
+    margin: -6px 0;
+    border-radius: 8px;
+    background: #FF9800;
+}
+QSlider#sliderThrottle::handle:horizontal { background: #4CAF50; }
+QSlider::handle:horizontal:hover { width: 18px; height: 18px; }
+QLabel.value {
+    font-weight: bold;
+    color: #2196F3;
+}
+QLabel.status-disconnected { color: #F44336; font-weight: bold; }
+QLabel.status-connected { color: #4CAF50; font-weight: bold; }
+QLabel.status-warning { color: #FF9800; font-weight: bold; }
+   </string>
+  </property>
+  <layout class="QVBoxLayout" name="mainLayout">
+   <property name="spacing">
+    <number>10</number>
+   </property>
+   <property name="leftMargin">
+    <number>10</number>
+   </property>
+   <property name="topMargin">
+    <number>10</number>
+   </property>
+   <property name="rightMargin">
+    <number>10</number>
+   </property>
+   <property name="bottomMargin">
+    <number>10</number>
+   </property>
+   <item>
+    <widget class="QGroupBox" name="groupConnection">
+     <property name="title">
+      <string>KẾT NỐI DRONE</string>
+     </property>
+     <layout class="QHBoxLayout" name="layoutConnection">
+      <property name="spacing">
+       <number>10</number>
+      </property>
+      <item>
+       <widget class="QLabel" name="labelCom">
+        <property name="text">
+         <string>📍 Cổng COM:</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QComboBox" name="comboCom">
+        <property name="editable">
+         <bool>false</bool>
+        </property>
+        <property name="minimumWidth">
+         <number>160</number>
+        </property>
+        <item>
+         <property name="text">
+          <string>Chọn cổng COM</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>COM1</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>COM2</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>COM3</string>
+         </property>
+        </item>
+        <item>
+         <property name="text">
+          <string>COM4</string>
+         </property>
+        </item>
+       </widget>
+      </item>
+      <item>
+       <widget class="QPushButton" name="btnConnect">
+        <property name="text">
+         <string>Kết Nối</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <widget class="QLabel" name="labelStatus">
+        <property name="text">
+         <string>❌ Chưa kết nối</string>
+        </property>
+        <property name="property">
+         <string notr="true">status-disconnected</string>
+        </property>
+        <property name="styleSheet">
+         <string notr="true">QLabel{ color: #F44336; font-weight: bold; }</string>
+        </property>
+       </widget>
+      </item>
+      <item>
+       <spacer name="horizontalSpacer1">
+        <property name="orientation">
+         <enum>Qt::Horizontal</enum>
+        </property>
+        <property name="sizeHint" stdset="0">
+         <size>
+          <width>40</width>
+          <height>20</height>
+         </size>
+        </property>
+       </spacer>
+      </item>
+     </layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupControl">
+     <property name="title">
+      <string>ĐIỀU KHIỂN DRONE</string>
+     </property>
+     <layout class="QHBoxLayout" name="layoutControl">
+      <property name="spacing">
+       <number>10</number>
+      </property>
+      <item>
+       <widget class="QGroupBox" name="groupBasic">
+        <property name="title">
+         <string>Lệnh Cơ Bản</string>
+        </property>
+        <property name="minimumWidth">
+         <number>150</number>
+        </property>
+        <layout class="QVBoxLayout" name="layoutBasic">
+         <property name="spacing">
+          <number>8</number>
+         </property>
+         <item>
+          <widget class="QPushButton" name="btnArm">
+           <property name="text">
+            <string>⚡ Khởi Động</string>
+           </property>
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnTakeoff">
+           <property name="text">
+            <string>🛫 Cất Cánh</string>
+           </property>
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnLand">
+           <property name="text">
+            <string>🛬 Hạ Cánh</string>
+           </property>
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <widget class="QPushButton" name="btnRTH">
+           <property name="text">
+            <string>🏠 Về Nhà</string>
+           </property>
+           <property name="enabled">
+            <bool>false</bool>
+           </property>
+          </widget>
+         </item>
+         <item>
+          <spacer name="verticalSpacerBasic">
+           <property name="orientation">
+            <enum>Qt::Vertical</enum>
+           </property>
+           <property name="sizeHint" stdset="0">
+            <size>
+             <width>20</width>
+             <height>40</height>
+            </size>
+           </property>
+          </spacer>
+         </item>
+        </layout>
+       </widget>
+      </item>
+     <item>
+      <widget class="QGroupBox" name="groupAutoTarget">
+       <property name="title">
+        <string>Điều Khiển Tọa Độ</string>
+       </property>
+       <layout class="QVBoxLayout" name="layoutAutoTarget">
+        <property name="spacing">
+         <number>10</number>
+        </property>
+        <item>
+         <layout class="QGridLayout" name="layoutTargetInput">
+          <property name="horizontalSpacing">
+           <number>8</number>
+          </property>
+          <property name="verticalSpacing">
+           <number>8</number>
+          </property>
+          <item row="0" column="0">
+           <widget class="QLabel" name="labelTargetLat">
+            <property name="text">
+             <string>Vĩ độ:</string>
+            </property>
+            <property name="font">
+             <font>
+              <bold>true</bold>
+             </font>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="1">
+           <widget class="QLineEdit" name="inputTargetLat">
+            <property name="placeholderText">
+             <string>VD: 10.776</string>
+            </property>
+            <property name="inputMethodHints">
+             <set>Qt::ImhFormattedNumbersOnly</set>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="2">
+           <widget class="QLabel" name="labelTargetLon">
+            <property name="text">
+             <string>Kinh độ:</string>
+            </property>
+            <property name="font">
+             <font>
+              <bold>true</bold>
+             </font>
+            </property>
+           </widget>
+          </item>
+          <item row="0" column="3">
+           <widget class="QLineEdit" name="inputTargetLon">
+            <property name="placeholderText">
+             <string>VD: 106.697</string>
+            </property>
+            <property name="inputMethodHints">
+             <set>Qt::ImhFormattedNumbersOnly</set>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="0">
+           <widget class="QLabel" name="labelTargetAlt">
+            <property name="text">
+             <string>Độ cao (m):</string>
+            </property>
+            <property name="font">
+             <font>
+              <bold>true</bold>
+             </font>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="1">
+           <widget class="QLineEdit" name="inputTargetAlt">
+            <property name="placeholderText">
+             <string>VD: 25</string>
+            </property>
+            <property name="inputMethodHints">
+             <set>Qt::ImhFormattedNumbersOnly</set>
+            </property>
+           </widget>
+          </item>
+          <item row="1" column="2" colspan="2">
+           <widget class="QPushButton" name="btnGoToTarget">
+            <property name="text">
+             <string>📍 Bay tới tọa độ</string>
+            </property>
+            <property name="enabled">
+             <bool>false</bool>
+            </property>
+           </widget>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QHBoxLayout" name="layoutCurrentPosition">
+          <item>
+           <widget class="QLabel" name="labelCurrentPos">
+            <property name="text">
+             <string>Vị trí hiện tại:</string>
+            </property>
+            <property name="font">
+             <font>
+              <bold>true</bold>
+             </font>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QLabel" name="valueCurrentPos">
+            <property name="text">
+             <string>--</string>
+            </property>
+            <property name="property">
+             <string notr="true">value</string>
+            </property>
+            <property name="styleSheet">
+             <string notr="true">QLabel{ font-weight: bold; color: #2196F3; }</string>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <spacer name="horizontalSpacerCurrentPos">
+            <property name="orientation">
+             <enum>Qt::Horizontal</enum>
+            </property>
+            <property name="sizeHint" stdset="0">
+             <size>
+              <width>40</width>
+              <height>20</height>
+             </size>
+            </property>
+           </spacer>
+          </item>
+         </layout>
+        </item>
+        <item>
+         <layout class="QVBoxLayout" name="layoutPositionHistory">
+          <item>
+           <widget class="QLabel" name="labelPositionHistory">
+            <property name="text">
+             <string>Lịch sử vị trí:</string>
+            </property>
+            <property name="font">
+             <font>
+              <bold>true</bold>
+             </font>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <widget class="QTextEdit" name="textPositionHistory">
+            <property name="readOnly">
+             <bool>true</bool>
+            </property>
+            <property name="placeholderText">
+             <string>Ví dụ: 10.776, 106.697, 25m (12:30:05)</string>
+            </property>
+            <property name="minimumHeight">
+             <number>90</number>
+            </property>
+           </widget>
+          </item>
+          <item>
+           <layout class="QHBoxLayout" name="layoutClearHistory">
+            <item>
+             <spacer name="horizontalSpacerClearHistory">
+              <property name="orientation">
+               <enum>Qt::Horizontal</enum>
+              </property>
+              <property name="sizeHint" stdset="0">
+               <size>
+                <width>40</width>
+                <height>20</height>
+               </size>
+              </property>
+             </spacer>
+            </item>
+            <item>
+             <widget class="QPushButton" name="btnClearHistory">
+              <property name="text">
+               <string>🧹 Xóa lịch sử</string>
+              </property>
+             </widget>
+            </item>
+           </layout>
+          </item>
+         </layout>
+        </item>
+       </layout>
+      </widget>
+     </item>
+</layout>
+    </widget>
+   </item>
+   <item>
+    <widget class="QGroupBox" name="groupTelemetry">
+     <property name="title">
+      <string>THÔNG TIN TELEMETRY</string>
+     </property>
+     <layout class="QGridLayout" name="layoutTelemetry">
+     <property name="horizontalSpacing">
+      <number>10</number>
+     </property>
+     <property name="verticalSpacing">
+      <number>10</number>
+     </property>
+     <item row="0" column="0">
+      <widget class="QLabel" name="labelBattery">
+       <property name="text">
+        <string>🔋 Pin:</string>
+       </property>
+       <property name="minimumWidth">
+        <number>70</number>
+       </property>
+       <property name="font">
+        <font>
+         <bold>true</bold>
+        </font>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="1">
+      <widget class="QLabel" name="valueBattery">
+       <property name="text">
+        <string>85%</string>
+       </property>
+       <property name="property">
+        <string notr="true">value</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QLabel{ font-weight: bold; color: #2196F3; }</string>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="2">
+       <widget class="QLabel" name="labelAltitude">
+        <property name="text">
+         <string>📡 RSSI:</string>
+        </property>
+       <property name="minimumWidth">
+        <number>70</number>
+       </property>
+       <property name="font">
+        <font>
+         <bold>true</bold>
+        </font>
+       </property>
+      </widget>
+     </item>
+     <item row="0" column="3">
+       <widget class="QLabel" name="valueAltitude">
+        <property name="text">
+         <string>L:-- R:--</string>
+        </property>
+       <property name="property">
+        <string notr="true">value</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QLabel{ font-weight: bold; color: #2196F3; }</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="0">
+      <widget class="QLabel" name="labelGps">
+       <property name="text">
+        <string>🗺️ GPS:</string>
+       </property>
+       <property name="minimumWidth">
+        <number>70</number>
+       </property>
+       <property name="font">
+        <font>
+         <bold>true</bold>
+        </font>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="1">
+      <widget class="QLabel" name="valueGps">
+       <property name="text">
+        <string>10.776°N, 106.697°E</string>
+       </property>
+       <property name="property">
+        <string notr="true">value</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QLabel{ font-weight: bold; color: #2196F3; }</string>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="2">
+      <widget class="QLabel" name="labelAttitude">
+       <property name="text">
+        <string>🧭 Thái Độ:</string>
+       </property>
+       <property name="minimumWidth">
+        <number>70</number>
+       </property>
+       <property name="font">
+        <font>
+         <bold>true</bold>
+        </font>
+       </property>
+      </widget>
+     </item>
+     <item row="1" column="3">
+      <widget class="QLabel" name="valueAttitude">
+       <property name="text">
+        <string>Roll:0°, Pitch:0°, Yaw:0°</string>
+       </property>
+       <property name="property">
+        <string notr="true">value</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QLabel{ font-weight: bold; color: #2196F3; }</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="0">
+      <widget class="QLabel" name="labelSpeed">
+       <property name="text">
+        <string>🚀 Tốc độ:</string>
+       </property>
+       <property name="minimumWidth">
+        <number>70</number>
+       </property>
+       <property name="font">
+        <font>
+         <bold>true</bold>
+        </font>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="1">
+      <widget class="QLabel" name="valueSpeed">
+       <property name="text">
+        <string>0 m/s</string>
+       </property>
+       <property name="property">
+        <string notr="true">value</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QLabel{ font-weight: bold; color: #2196F3; }</string>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="2">
+      <widget class="QLabel" name="labelFlightStatus">
+       <property name="text">
+        <string>📡 Trạng thái:</string>
+       </property>
+       <property name="minimumWidth">
+        <number>70</number>
+       </property>
+       <property name="font">
+        <font>
+         <bold>true</bold>
+        </font>
+       </property>
+      </widget>
+     </item>
+     <item row="2" column="3">
+      <widget class="QLabel" name="valueFlightStatus">
+       <property name="text">
+        <string>--</string>
+       </property>
+       <property name="property">
+        <string notr="true">value</string>
+       </property>
+       <property name="styleSheet">
+        <string notr="true">QLabel{ font-weight: bold; color: #2196F3; }</string>
+       </property>
+      </widget>
+     </item>
+    </layout>
+    </widget>
+   </item>
+  </layout>
+ </widget>
+ <resources/>
+ <connections/>
+</ui>

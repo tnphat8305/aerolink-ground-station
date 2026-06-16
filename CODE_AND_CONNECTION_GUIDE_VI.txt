@@ -1,0 +1,251 @@
+GIAI THICH CODE VA CAC CACH KET NOI DRONE VOI PC
+=================================================
+
+1. Tong quan app
+----------------
+App nay la tram dieu khien drone viet bang C++/Qt. App giao tiep voi drone thong qua
+cong serial COM tren PC. Du lieu gui/nhan la MAVLink packet.
+
+Luong tong quat:
+
+PC App <-> COM/UART <-> LoRa ground module <-> LoRa air module <-> UART <-> Flight Controller
+
+Neu module LoRa hoat dong o che do transparent UART, app khong can biet ben duoi la LoRa.
+App chi can mo dung cong COM va baud rate, sau do doc/ghi byte MAVLink.
+
+
+2. Cac file chinh
+-----------------
+- main.cpp
+  Chua toan bo giao dien Qt, serial worker, parser MAVLink, cac nut dieu khien va hien thi telemetry.
+
+- CMakeLists.txt
+  Cau hinh build Qt/C++.
+
+- run_cpp.bat
+  Script cau hinh PATH Qt/MinGW, build va chay app.
+
+- README_CPP.txt
+  Ghi chu build/chay ngan gon.
+
+
+3. Kien truc trong main.cpp
+---------------------------
+3.1. MAVLink parser/encoder
+
+Code co cac ham:
+
+- readLe<T>()
+  Doc du lieu little-endian tu payload MAVLink.
+
+- writeLe<T>()
+  Ghi du lieu little-endian vao payload MAVLink.
+
+- mavCrc()
+  Tinh checksum MAVLink.
+
+- crcExtra()
+  Tra ve CRC extra cua tung MAVLink message dang ho tro.
+
+- MavParser::push()
+  Nhan byte raw tu serial, ghep thanh MAVLink packet hop le.
+  Ho tro MAVLink v1 va v2 khi nhan.
+
+- makeV1Packet()
+  Tao MAVLink v1 packet de gui len flight controller.
+
+
+3.2. MavlinkWorker
+
+Day la lop lam viec voi serial/MAVLink. Lop nay chay trong QThread rieng de tranh lam do giao dien.
+
+Nhiem vu:
+- Mo cong COM.
+- Doc byte tu LoRa/serial.
+- Parse MAVLink packet.
+- Cap nhat telemetry.
+- Gui lenh ARM, TAKEOFF, LAND, RTH, GOTO.
+- Theo doi LoRa link health.
+- Ghi event log COMMAND_ACK va STATUSTEXT.
+
+Cac signal quan trong:
+- statusChanged(text, style)
+  Cap nhat trang thai tren giao dien.
+
+- telemetryUpdate(data)
+  Cap nhat pin, GPS, attitude, speed, mode, RSSI.
+
+- linkStatsUpdate(data)
+  Cap nhat RX rate, TX rate, packet rate, heartbeat age.
+
+- eventLog(text, level)
+  Ghi log su kien MAVLink/LoRa.
+
+
+3.3. DroneControlApp
+
+Day la lop giao dien chinh.
+
+Giao dien gom:
+- LINK CONFIGURATION
+  Chon COM port, baud rate, refresh cong COM, connect/disconnect.
+
+- FLIGHT COMMANDS
+  ARM, TAKE OFF, LAND, RETURN HOME.
+
+- AUTONOMOUS TARGET
+  Nhap latitude, longitude, altitude va gui lenh GO TO TARGET.
+
+- LORA LINK HEALTH
+  Hien thi chat luong link LoRa/MAVLink:
+  RX Rate, TX Rate, Packet Rate, Last Heartbeat, Last Message.
+
+- LIVE TELEMETRY
+  Hien thi Battery, RSSI, GPS, Attitude, Speed, Flight Mode.
+
+- POSITION HISTORY
+  Luu lich su vi tri GPS nhan duoc.
+
+- MAVLINK EVENT LOG
+  Hien thi COMMAND_ACK, STATUSTEXT, event gui/nhan.
+
+
+4. Cac MAVLink message dang ho tro
+----------------------------------
+Nhan tu drone:
+- HEARTBEAT
+  Biet drone con song, lay flight mode.
+
+- SYS_STATUS
+  Lay battery remaining.
+
+- GPS_RAW_INT
+  Lay GPS khi co fix.
+
+- GLOBAL_POSITION_INT
+  Lay vi tri, do cao, toc do.
+
+- ATTITUDE
+  Lay roll, pitch, yaw.
+
+- RADIO_STATUS
+  Lay RSSI neu flight controller/radio co gui.
+
+- COMMAND_ACK
+  Biet lenh da duoc nhan/chao nhan/tu choi.
+
+- STATUSTEXT
+  Nhan thong bao loi/trang thai tu ArduPilot/PX4.
+
+Gui den drone:
+- COMMAND_LONG
+  Dung cho ARM, TAKEOFF, LAND, RTH.
+
+- SET_MODE
+  Chuyen mode GUIDED/RTL.
+
+- SET_POSITION_TARGET_GLOBAL_INT
+  Gui toa do GOTO.
+
+
+5. Cach ket noi drone voi PC
+----------------------------
+5.1. Ket noi bang LoRa UART transparent
+
+So do:
+
+PC USB <-> USB-UART/LoRa ground <-> LoRa wireless <-> LoRa air <-> UART TELEM flight controller
+
+Dieu kien:
+- LoRa ground hien tren PC thanh cong COM.
+- Hai module LoRa da pair/cung tan so/cung cau hinh.
+- LoRa chay che do transparent UART.
+- Baud PC <-> LoRa ground dung voi baud module.
+- Baud LoRa air <-> flight controller dung voi TELEM port.
+- Flight controller dang gui MAVLink tren TELEM port.
+
+App can:
+- Chon dung COM port.
+- Chon dung baud rate.
+- Bam Connect.
+
+
+5.2. Ket noi truc tiep USB telemetry/FTDI
+
+So do:
+
+PC USB <-> USB-UART/Telemetry radio <-> Flight Controller TELEM
+
+App van dung nhu LoRa:
+- Chon COM.
+- Baud rate.
+- Connect.
+
+
+5.3. Ket noi USB truc tiep flight controller
+
+So do:
+
+PC USB <-> Flight Controller USB
+
+Thuong dung cho test ban dau. Neu flight controller xuat MAVLink qua USB, app co the nhan duoc HEARTBEAT.
+
+
+6. Can cau hinh gi tren flight controller
+-----------------------------------------
+Voi ArduPilot, can kiem tra cac tham so serial tuong ung TELEM port:
+
+- SERIALx_PROTOCOL = 2
+  MAVLink2.
+
+- SERIALx_BAUD
+  Trung voi baud LoRa/telemetry.
+  Vi du 57 = 57600, 115 = 115200 tuy firmware.
+
+- SRx_* rates
+  Toc do gui telemetry. Voi LoRa nen de vua phai, tranh qua tai bang thong.
+
+Neu dung GOTO:
+- Drone can co GPS fix.
+- Mode GUIDED phai duoc ho tro.
+- EKF/GPS/arming checks phai dat.
+
+
+7. Luu y rieng cho LoRa
+-----------------------
+LoRa co bang thong thap va do tre cao hon telemetry radio/USB, nen:
+
+- Khong gui lenh lien tuc qua nhanh.
+- Nen theo doi COMMAND_ACK.
+- Nen theo doi Last Heartbeat va Last Message.
+- Neu RX Rate bang 0, PC khong nhan duoc byte tu LoRa.
+- Neu RX Rate co nhung Packet Rate bang 0, co the baud sai hoac du lieu khong phai MAVLink.
+- Neu Packet Rate co nhung Last Heartbeat Never, flight controller co the khong gui HEARTBEAT hoac packet bi loi.
+
+
+8. Cac buoc debug ket noi
+-------------------------
+1) Kiem tra Windows Device Manager co thay COM cua LoRa khong.
+2) Bam Refresh trong app, xem COM co hien khong.
+3) Chon baud dung.
+4) Bam Connect.
+5) Xem LORA LINK HEALTH:
+   - RX Rate > 0: PC dang nhan byte.
+   - Packet Rate > 0: app parse duoc MAVLink.
+   - Last Heartbeat cap nhat: flight controller gui HEARTBEAT.
+6) Xem MAVLINK EVENT LOG:
+   - STATUSTEXT cho biet loi tu flight controller.
+   - COMMAND_ACK cho biet lenh co duoc chap nhan khong.
+
+
+9. Huong phat trien tiep
+------------------------
+Nen bo sung them:
+- Safety switch: Monitor Only / Command Enabled.
+- Confirm dialog cho ARM, TAKEOFF, LAND, RTH.
+- Auto detect baud.
+- Save cau hinh COM/baud lan cuoi.
+- Bang message inspector hien raw MAVLink message.
+- CRC fail counter trong parser.
+- Export log ra file.
+
