@@ -25,7 +25,7 @@ App chi can mo dung cong COM va baud rate, sau do doc/ghi byte MAVLink.
 - run_cpp.bat
   Script cau hinh PATH Qt/MinGW, build va chay app.
 
-- README_CPP.txt
+- README.md
   Ghi chu build/chay ngan gon.
 
 
