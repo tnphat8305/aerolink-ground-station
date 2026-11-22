@@ -3,10 +3,11 @@ setlocal
 
 cd /d "%~dp0"
 
-set "QT_DIR=C:\Qt\6.11.0\mingw_64"
-set "CMAKE_EXE=C:\Qt\Tools\CMake_64\bin\cmake.exe"
-set "NINJA_EXE=C:\Qt\Tools\Ninja\ninja.exe"
-set "MINGW_DIR=C:\Qt\Tools\mingw1310_64"
+rem Override any of these by setting the variable before running the script.
+if not defined QT_DIR set "QT_DIR=C:\Qt\6.11.0\mingw_64"
+if not defined CMAKE_EXE set "CMAKE_EXE=C:\Qt\Tools\CMake_64\bin\cmake.exe"
+if not defined NINJA_EXE set "NINJA_EXE=C:\Qt\Tools\Ninja\ninja.exe"
+if not defined MINGW_DIR set "MINGW_DIR=C:\Qt\Tools\mingw1310_64"
 
 set "QTFRAMEWORK_BYPASS_LICENSE_CHECK=1"
 set "PATH=%MINGW_DIR%\bin;%QT_DIR%\bin;C:\Qt\Tools\Ninja;%PATH%"
@@ -47,6 +48,14 @@ echo Dang build main.cpp...
 
 if errorlevel 1 (
     echo Build that bai.
+    pause
+    exit /b 1
+)
+
+echo Dang chay test parser MAVLink/MSP...
+build\test_protocol.exe
+if errorlevel 1 (
+    echo Test that bai.
     pause
     exit /b 1
 )

@@ -1,8 +1,11 @@
+#include <QtCore/QCache>
 #include <QtCore/QDateTime>
 #include <QtCore/QDebug>
 #include <QtCore/QHash>
 #include <QtCore/QMetaObject>
 #include <QtCore/QSet>
+#include <QtCore/QSettings>
+#include <QtCore/QStandardPaths>
 #include <QtCore/QThread>
 #include <QtCore/QTimer>
 #include <QtCore/QElapsedTimer>
@@ -15,6 +18,7 @@
 #include <QtGui/QPixmap>
 #include <QtGui/QWheelEvent>
 #include <QtNetwork/QNetworkAccessManager>
+#include <QtNetwork/QNetworkDiskCache>
 #include <QtNetwork/QNetworkReply>
 #include <QtNetwork/QNetworkRequest>
 #include <QtSerialPort/QSerialPort>
@@ -27,6 +31,7 @@
 #include <QtWidgets/QHBoxLayout>
 #include <QtWidgets/QLabel>
 #include <QtWidgets/QLineEdit>
+#include <QtWidgets/QMessageBox>
 #include <QtWidgets/QPushButton>
 #include <QtWidgets/QSizePolicy>
 #include <QtWidgets/QTabWidget>
@@ -39,329 +44,8 @@
 #include <cstring>
 #include <stdexcept>
 
-namespace {
+#include "mavlink_protocol.h"
 
-constexpr uint8_t MavStxV1 = 0xFE;
-constexpr uint8_t MavStxV2 = 0xFD;
-
-constexpr uint8_t MavTypeGcs = 6;
-constexpr uint8_t MavAutopilotInvalid = 8;
-constexpr uint8_t MavStateActive = 4;
-
-constexpr uint8_t MavFrameGlobalRelativeAltInt = 6;
-constexpr uint8_t MavModeFlagCustomModeEnabled = 1;
-
-constexpr uint8_t MavDataStreamExtendedStatus = 2;
-constexpr uint8_t MavDataStreamPosition = 6;
-constexpr uint8_t MavDataStreamExtra1 = 10;
-constexpr uint8_t MavDataStreamExtra2 = 11;
-constexpr uint8_t MavDataStreamExtra3 = 12;
-
-constexpr uint8_t MspApiVersion = 1;
-constexpr uint8_t MspFcVariant = 2;
-constexpr uint8_t MspFcVersion = 3;
-constexpr uint8_t MspStatus = 101;
-constexpr uint8_t MspRawImu = 102;
-constexpr uint8_t MspRawGps = 106;
-constexpr uint8_t MspAttitude = 108;
-constexpr uint8_t MspAltitude = 109;
-constexpr uint8_t MspAnalog = 110;
-constexpr uint8_t MspBatteryState = 130;
-
-constexpr uint16_t MavCmdNavLand = 21;
-constexpr uint16_t MavCmdNavTakeoff = 22;
-constexpr uint16_t MavCmdNavReturnToLaunch = 20;
-constexpr uint16_t MavCmdComponentArmDisarm = 400;
-
-constexpr uint32_t ArduModeGuided = 4;
-constexpr uint32_t ArduModeRtl = 6;
-
-template <typename T>
-T readLe(const QByteArray &data, int offset)
-{
-    T value{};
-    if (offset < 0 || offset + int(sizeof(T)) > data.size()) {
-        return value;
-    }
-    std::memcpy(&value, data.constData() + offset, sizeof(T));
-    return value;
-}
-
-template <typename T>
-void writeLe(QByteArray &data, int offset, T value)
-{
-    if (offset < 0 || offset + int(sizeof(T)) > data.size()) {
-        return;
-    }
-    std::memcpy(data.data() + offset, &value, sizeof(T));
-}
-
-void crcAccumulate(uint8_t value, uint16_t &crc)
-{
-    value ^= uint8_t(crc & 0xFF);
-    value ^= uint8_t(value << 4);
-    crc = uint16_t((crc >> 8) ^ (uint16_t(value) << 8) ^ (uint16_t(value) << 3) ^ (uint16_t(value) >> 4));
-}
-
-uint16_t mavCrc(const QByteArray &headerWithoutStx, const QByteArray &payload, uint8_t crcExtra)
-{
-    uint16_t crc = 0xFFFF;
-    for (char b : headerWithoutStx) {
-        crcAccumulate(uint8_t(b), crc);
-    }
-    for (char b : payload) {
-        crcAccumulate(uint8_t(b), crc);
-    }
-    crcAccumulate(crcExtra, crc);
-    return crc;
-}
-
-uint8_t crcExtra(uint32_t msgId)
-{
-    switch (msgId) {
-    case 0: return 50;   // HEARTBEAT
-    case 1: return 124;  // SYS_STATUS
-    case 11: return 89;  // SET_MODE
-    case 24: return 24;  // GPS_RAW_INT
-    case 30: return 39;  // ATTITUDE
-    case 33: return 104; // GLOBAL_POSITION_INT
-    case 66: return 148; // REQUEST_DATA_STREAM
-    case 76: return 152; // COMMAND_LONG
-    case 77: return 143; // COMMAND_ACK
-    case 86: return 5;   // SET_POSITION_TARGET_GLOBAL_INT
-    case 109: return 185; // RADIO_STATUS
-    case 253: return 83; // STATUSTEXT
-    default: return 0;
-    }
-}
-
-QString arduModeName(uint32_t customMode)
-{
-    switch (customMode) {
-    case 0: return "STABILIZE";
-    case 1: return "ACRO";
-    case 2: return "ALT_HOLD";
-    case 3: return "AUTO";
-    case 4: return "GUIDED";
-    case 5: return "LOITER";
-    case 6: return "RTL";
-    case 7: return "CIRCLE";
-    case 9: return "LAND";
-    case 11: return "DRIFT";
-    case 13: return "SPORT";
-    case 14: return "FLIP";
-    case 15: return "AUTOTUNE";
-    case 16: return "POSHOLD";
-    case 17: return "BRAKE";
-    case 18: return "THROW";
-    case 19: return "AVOID_ADSB";
-    case 20: return "GUIDED_NOGPS";
-    case 21: return "SMART_RTL";
-    default: return QString("MODE %1").arg(customMode);
-    }
-}
-
-struct MavPacket {
-    uint32_t msgId = 0;
-    uint8_t sysId = 0;
-    uint8_t compId = 0;
-    QByteArray payload;
-};
-
-struct MspPacket {
-    uint8_t cmd = 0;
-    bool error = false;
-    QByteArray payload;
-};
-
-class MavParser {
-public:
-    QList<MavPacket> push(const QByteArray &bytes)
-    {
-        buffer_.append(bytes);
-        if (buffer_.size() > maxBufferSize_) {
-            buffer_.remove(0, buffer_.size() - maxBufferSize_);
-        }
-
-        QList<MavPacket> packets;
-
-        while (!buffer_.isEmpty()) {
-            const uint8_t stx = uint8_t(buffer_.at(0));
-            if (stx != MavStxV1 && stx != MavStxV2) {
-                buffer_.remove(0, 1);
-                continue;
-            }
-
-            if (stx == MavStxV1) {
-                if (buffer_.size() < 8) {
-                    break;
-                }
-                const int payloadLen = uint8_t(buffer_.at(1));
-                const int frameLen = 6 + payloadLen + 2;
-                if (buffer_.size() < frameLen) {
-                    break;
-                }
-
-                QByteArray frame = buffer_.left(frameLen);
-                buffer_.remove(0, frameLen);
-
-                const uint32_t msgId = uint8_t(frame.at(5));
-                const QByteArray header = frame.mid(1, 5);
-                const QByteArray payload = frame.mid(6, payloadLen);
-                const uint16_t expected = readLe<uint16_t>(frame, 6 + payloadLen);
-                if (mavCrc(header, payload, crcExtra(msgId)) != expected) {
-                    continue;
-                }
-
-                packets.append({msgId, uint8_t(frame.at(3)), uint8_t(frame.at(4)), payload});
-                continue;
-            }
-
-            if (buffer_.size() < 12) {
-                break;
-            }
-            const int payloadLen = uint8_t(buffer_.at(1));
-            const bool signedFrame = (uint8_t(buffer_.at(2)) & 0x01) != 0;
-            const int signatureLen = signedFrame ? 13 : 0;
-            const int frameLen = 10 + payloadLen + 2 + signatureLen;
-            if (buffer_.size() < frameLen) {
-                break;
-            }
-
-            QByteArray frame = buffer_.left(frameLen);
-            buffer_.remove(0, frameLen);
-
-            const uint32_t msgId = uint8_t(frame.at(7)) | (uint32_t(uint8_t(frame.at(8))) << 8) | (uint32_t(uint8_t(frame.at(9))) << 16);
-            const QByteArray header = frame.mid(1, 9);
-            const QByteArray payload = frame.mid(10, payloadLen);
-            const uint16_t expected = readLe<uint16_t>(frame, 10 + payloadLen);
-            if (mavCrc(header, payload, crcExtra(msgId)) != expected) {
-                continue;
-            }
-
-            packets.append({msgId, uint8_t(frame.at(5)), uint8_t(frame.at(6)), payload});
-        }
-
-        return packets;
-    }
-
-    void clear()
-    {
-        buffer_.clear();
-    }
-
-private:
-    static constexpr int maxBufferSize_ = 8192;
-    QByteArray buffer_;
-};
-
-class MspParser {
-public:
-    QList<MspPacket> push(const QByteArray &bytes)
-    {
-        buffer_.append(bytes);
-        if (buffer_.size() > maxBufferSize_) {
-            buffer_.remove(0, buffer_.size() - maxBufferSize_);
-        }
-
-        QList<MspPacket> packets;
-
-        while (buffer_.size() >= 6) {
-            if (uint8_t(buffer_.at(0)) != '$') {
-                buffer_.remove(0, 1);
-                continue;
-            }
-
-            if (buffer_.size() < 3) {
-                break;
-            }
-
-            if (uint8_t(buffer_.at(1)) != 'M') {
-                buffer_.remove(0, 1);
-                continue;
-            }
-
-            const uint8_t direction = uint8_t(buffer_.at(2));
-            if (direction != '>' && direction != '!') {
-                buffer_.remove(0, 1);
-                continue;
-            }
-
-            const int payloadLen = uint8_t(buffer_.at(3));
-            const int frameLen = 6 + payloadLen;
-            if (buffer_.size() < frameLen) {
-                break;
-            }
-
-            QByteArray frame = buffer_.left(frameLen);
-            buffer_.remove(0, frameLen);
-
-            uint8_t checksum = uint8_t(frame.at(3)) ^ uint8_t(frame.at(4));
-            const QByteArray payload = frame.mid(5, payloadLen);
-            for (char b : payload) {
-                checksum ^= uint8_t(b);
-            }
-
-            if (checksum != uint8_t(frame.at(5 + payloadLen))) {
-                continue;
-            }
-
-            packets.append({uint8_t(frame.at(4)), direction == '!', payload});
-        }
-
-        return packets;
-    }
-
-    void clear()
-    {
-        buffer_.clear();
-    }
-
-private:
-    static constexpr int maxBufferSize_ = 8192;
-    QByteArray buffer_;
-};
-
-QByteArray makeV1Packet(uint8_t &seq, uint8_t sysId, uint8_t compId, uint8_t msgId, const QByteArray &payload)
-{
-    QByteArray header;
-    header.append(char(payload.size()));
-    header.append(char(seq++));
-    header.append(char(sysId));
-    header.append(char(compId));
-    header.append(char(msgId));
-
-    const uint16_t crc = mavCrc(header, payload, crcExtra(msgId));
-
-    QByteArray packet;
-    packet.append(char(MavStxV1));
-    packet.append(header);
-    packet.append(payload);
-    packet.append(char(crc & 0xFF));
-    packet.append(char((crc >> 8) & 0xFF));
-    return packet;
-}
-
-QByteArray makeMspRequest(uint8_t cmd, const QByteArray &payload = QByteArray())
-{
-    QByteArray packet;
-    packet.append('$');
-    packet.append('M');
-    packet.append('<');
-    packet.append(char(payload.size()));
-    packet.append(char(cmd));
-
-    uint8_t checksum = uint8_t(payload.size()) ^ cmd;
-    for (char b : payload) {
-        checksum ^= uint8_t(b);
-        packet.append(b);
-    }
-
-    packet.append(char(checksum));
-    return packet;
-}
-
-} // namespace
 
 class DroneMapWidget : public QWidget {
 public:
@@ -371,6 +55,11 @@ public:
         setMinimumHeight(420);
         setMouseTracking(true);
         network_ = new QNetworkAccessManager(this);
+        // Persist tiles on disk: maps of visited areas keep working offline in the field (and OSM policy asks for caching).
+        auto *diskCache = new QNetworkDiskCache(network_);
+        diskCache->setCacheDirectory(QStandardPaths::writableLocation(QStandardPaths::CacheLocation) + "/osm-tiles");
+        diskCache->setMaximumCacheSize(200LL * 1024 * 1024);
+        network_->setCache(diskCache);
         clockTimer_ = new QTimer(this);
         clockTimer_->setInterval(1000);
         connect(clockTimer_, &QTimer::timeout, this, [this]() {
@@ -441,7 +130,7 @@ protected:
         p.drawText(drone + QPointF(12, -12), "DRONE");
 
         p.setPen(QColor("#D9E7FF"));
-        const QString info = QString("OSM tiles | Zoom %1 | Lat %2 | Lon %3 | Alt %4 m")
+        const QString info = QString("OSM tiles | Zoom %1 | Lat %2 | Lon %3 | Rel alt %4 m")
                                  .arg(zoom_)
                                  .arg(currentLat_, 0, 'f', 7)
                                  .arg(currentLon_, 0, 'f', 7)
@@ -548,8 +237,8 @@ private:
                 requestTile(zoom_, wrappedX, ty);
                 const QPointF drawAt(mapRect.left() + tx * tileSize_ - topLeftWorld.x(),
                                      mapRect.top() + ty * tileSize_ - topLeftWorld.y());
-                if (tileCache_.contains(key)) {
-                    p.drawPixmap(QRectF(drawAt, QSizeF(tileSize_, tileSize_)), tileCache_[key], QRectF(0, 0, tileSize_, tileSize_));
+                if (const QPixmap *tile = tileCache_.object(key)) {
+                    p.drawPixmap(QRectF(drawAt, QSizeF(tileSize_, tileSize_)), *tile, QRectF(0, 0, tileSize_, tileSize_));
                 } else {
                     p.fillRect(QRectF(drawAt, QSizeF(tileSize_, tileSize_)), QColor("#0D1528"));
                     p.setPen(QColor("#243653"));
@@ -583,20 +272,28 @@ private:
         if (tileCache_.contains(key) || pendingTiles_.contains(key)) {
             return;
         }
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (now - failedTiles_.value(key, 0) < tileRetryMs_) {
+            return; // paintEvent runs every second; don't hammer the tile server while offline
+        }
 
         pendingTiles_.insert(key);
         QNetworkRequest request(QUrl(QString("https://tile.openstreetmap.org/%1/%2/%3.png").arg(z).arg(x).arg(y)));
         request.setRawHeader("User-Agent", "AeroLinkDroneGroundStation/1.0");
+        request.setAttribute(QNetworkRequest::CacheLoadControlAttribute, QNetworkRequest::PreferCache);
         QNetworkReply *reply = network_->get(request);
         connect(reply, &QNetworkReply::finished, this, [this, reply, key]() {
             pendingTiles_.remove(key);
+            QPixmap pixmap;
             if (reply->error() == QNetworkReply::NoError) {
-                QPixmap pixmap;
                 pixmap.loadFromData(reply->readAll(), "PNG");
-                if (!pixmap.isNull()) {
-                    tileCache_.insert(key, pixmap);
-                    update();
-                }
+            }
+            if (pixmap.isNull()) {
+                failedTiles_.insert(key, QDateTime::currentMSecsSinceEpoch());
+            } else {
+                failedTiles_.remove(key);
+                tileCache_.insert(key, new QPixmap(pixmap));
+                update();
             }
             reply->deleteLater();
         });
@@ -618,8 +315,10 @@ private:
     QPoint lastMousePos_;
     QNetworkAccessManager *network_ = nullptr;
     QTimer *clockTimer_ = nullptr;
-    QHash<QString, QPixmap> tileCache_;
+    QCache<QString, QPixmap> tileCache_{512}; // ~32 MB of 256px tiles
     QSet<QString> pendingTiles_;
+    QHash<QString, qint64> failedTiles_;
+    const qint64 tileRetryMs_ = 30000;
 };
 
 class AttitudeChartWidget : public QWidget {
@@ -812,8 +511,6 @@ public:
         linkStatsTimer_->start();
     }
 
-    bool isConnected() const { return serial_->isOpen(); }
-
     void connectToVehicle(const QString &port, int baud)
     {
         if (serial_->isOpen()) {
@@ -887,6 +584,9 @@ public:
             emit eventLog("Rejected invalid baud rate.", "warn");
             return;
         }
+        if (baud == baud_) {
+            return;
+        }
 
         baud_ = baud;
         parser_.clear();
@@ -945,6 +645,7 @@ public:
     void takeoff(double altitudeM)
     {
         try {
+            setMode(ArduModeGuided); // ArduCopter rejects NAV_TAKEOFF outside GUIDED
             sendCommandLong(MavCmdNavTakeoff, 0, 0, 0, 0, 0, 0, float(altitudeM));
         } catch (const std::exception &e) {
             emit statusChanged(QString("Takeoff error: %1").arg(e.what()), "status-warning");
@@ -977,14 +678,15 @@ public:
 
             QByteArray payload(53, char(0));
             writeLe<uint32_t>(payload, 0, 0);
-            writeLe<int32_t>(payload, 4, int32_t(lat * 1e7));
-            writeLe<int32_t>(payload, 8, int32_t(lon * 1e7));
+            writeLe<int32_t>(payload, 4, int32_t(std::lround(lat * 1e7)));
+            writeLe<int32_t>(payload, 8, int32_t(std::lround(lon * 1e7)));
             writeLe<float>(payload, 12, float(alt));
             writeLe<uint16_t>(payload, 48, 0b0000111111111000);
             payload[50] = char(targetSystem_);
             payload[51] = char(targetComponent_);
             payload[52] = char(MavFrameGlobalRelativeAltInt);
             writePacket(86, payload);
+            emit eventLog(QString("Sent GOTO %1, %2 at %3 m rel").arg(lat, 0, 'f', 7).arg(lon, 0, 'f', 7).arg(alt, 0, 'f', 1), "tx");
             emit statusChanged("Navigating to target", "status-connected");
         } catch (const std::exception &e) {
             emit statusChanged(QString("Goto error: %1").arg(e.what()), "status-warning");
@@ -1023,9 +725,14 @@ private slots:
 
     void onSerialError(QSerialPort::SerialPortError error)
     {
-        if (error == QSerialPort::NoError || error == QSerialPort::TimeoutError || !wantedOpen_) {
+        // Only a vanished device or I/O failure means the link dropped. Open failures are handled by the
+        // caller, and e.g. UnsupportedOperationError from setRequestToSend() must not close a working port.
+        const bool linkDropped = error == QSerialPort::ResourceError || error == QSerialPort::ReadError
+            || error == QSerialPort::WriteError;
+        if (!linkDropped || !wantedOpen_) {
             return;
         }
+        emit eventLog(QString("Serial error: %1").arg(serial_->errorString()), "warn");
         if (serial_->isOpen()) {
             serial_->close();
         }
@@ -1051,7 +758,10 @@ private slots:
 
         serial_->setPortName(port_);
         serial_->setBaudRate(baud_);
+        parser_.clear();
+        mspParser_.clear();
         heartbeatSeen_ = false;
+        heartbeatAccepted_ = false;
         mspAccepted_ = false;
         protocol_ = LinkProtocol::Unknown;
         mspPollTick_ = 0;
@@ -1126,6 +836,7 @@ private:
 
         heartbeatValidationTimer_->stop();
         heartbeatAccepted_ = true;
+        heartbeatLost_ = false;
         protocol_ = LinkProtocol::Mavlink;
         mspPollTimer_->stop();
         reconnectAttempts_ = 0;
@@ -1153,14 +864,17 @@ private:
         QVariantMap data;
         lastMessageMs_ = linkClock_.elapsed();
 
-        if (packet.msgId == 0 && packet.payload.size() >= 9) {
+        if (packet.msgId == 0 && packet.payload.size() >= 9
+            && uint8_t(packet.payload.at(5)) != MavAutopilotInvalid) {
+            // Heartbeats from GCS/companion/gimbal (autopilot=INVALID) must not retarget commands.
             protocol_ = LinkProtocol::Mavlink;
             mspPollTimer_->stop();
             lastHeartbeatMs_ = linkClock_.elapsed();
             targetSystem_ = packet.sysId;
             targetComponent_ = packet.compId;
             const uint32_t customMode = readLe<uint32_t>(packet.payload, 0);
-            data["mode"] = arduModeName(customMode);
+            const bool armed = (uint8_t(packet.payload.at(6)) & MavModeFlagSafetyArmed) != 0;
+            data["mode"] = QString("%1 | %2").arg(arduModeName(customMode), armed ? "ARMED" : "DISARMED");
 
             if (!heartbeatSeen_) {
                 heartbeatSeen_ = true;
@@ -1170,20 +884,27 @@ private:
             }
         } else if (packet.msgId == 1 && packet.payload.size() >= 31) {
             const int8_t battery = readLe<int8_t>(packet.payload, 30);
+            const uint16_t voltageMv = readLe<uint16_t>(packet.payload, 14);
+            QStringList parts;
             if (battery >= 0) {
-                data["battery"] = QString("%1%").arg(battery);
+                parts << QString("%1%").arg(battery);
+            }
+            if (voltageMv != UINT16_MAX) {
+                parts << QString("%1 V").arg(voltageMv / 1000.0, 0, 'f', 2);
+            }
+            if (!parts.isEmpty()) {
+                data["battery"] = parts.join(" | ");
             }
         } else if (packet.msgId == 24 && packet.payload.size() >= 30) {
             const uint8_t fixType = uint8_t(packet.payload.at(28));
+            const uint8_t satellites = uint8_t(packet.payload.at(29));
             if (fixType >= 2) {
                 const double lat = readLe<int32_t>(packet.payload, 8) / 1e7;
                 const double lon = readLe<int32_t>(packet.payload, 12) / 1e7;
-                const double alt = readLe<int32_t>(packet.payload, 16) / 1000.0;
-                data["gps"] = QString("%1 N, %2 E").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6);
-                data["current_pos"] = QString("%1, %2, %3m").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(alt, 0, 'f', 1);
-                data["lat"] = lat;
-                data["lon"] = lon;
-                data["alt"] = alt;
+                data["gps"] = QString("%1 N, %2 E (%3D fix, %4 sats)")
+                                  .arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(fixType >= 3 ? 3 : 2).arg(satellites);
+            } else {
+                data["gps"] = QString("No fix (%1 sats)").arg(satellites);
             }
         } else if (packet.msgId == 30 && packet.payload.size() >= 28) {
             const double roll = readLe<float>(packet.payload, 4) * 57.2958;
@@ -1199,26 +920,29 @@ private:
         } else if (packet.msgId == 33 && packet.payload.size() >= 28) {
             const double lat = readLe<int32_t>(packet.payload, 4) / 1e7;
             const double lon = readLe<int32_t>(packet.payload, 8) / 1e7;
-            const double alt = readLe<int32_t>(packet.payload, 12) / 1000.0;
+            const double alt = readLe<int32_t>(packet.payload, 16) / 1000.0; // relative to home
             const double vx = readLe<int16_t>(packet.payload, 20);
             const double vy = readLe<int16_t>(packet.payload, 22);
             const double vz = readLe<int16_t>(packet.payload, 24);
             const double speed = std::sqrt(vx * vx + vy * vy + vz * vz) / 100.0;
-            data["gps"] = QString("%1 N, %2 E").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6);
-            data["current_pos"] = QString("%1, %2, %3m").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(alt, 0, 'f', 1);
+            data["current_pos"] = QString("%1, %2, %3 m rel").arg(lat, 0, 'f', 6).arg(lon, 0, 'f', 6).arg(alt, 0, 'f', 1);
             data["speed"] = QString("%1 m/s").arg(speed, 0, 'f', 1);
             data["lat"] = lat;
             data["lon"] = lon;
             data["alt"] = alt;
         } else if (packet.msgId == 109 && packet.payload.size() >= 9) {
-            data["rssi"] = QString("L:%1dB R:%2dB N:%3")
-                               .arg(uint8_t(packet.payload.at(0)))
-                               .arg(uint8_t(packet.payload.at(1)))
-                               .arg(uint8_t(packet.payload.at(3)));
+            data["rssi"] = QString("RSSI L:%1 R:%2 | Noise L:%3 R:%4")
+                               .arg(uint8_t(packet.payload.at(4)))
+                               .arg(uint8_t(packet.payload.at(5)))
+                               .arg(uint8_t(packet.payload.at(7)))
+                               .arg(uint8_t(packet.payload.at(8)));
         } else if (packet.msgId == 77 && packet.payload.size() >= 3) {
             const uint16_t command = readLe<uint16_t>(packet.payload, 0);
             const uint8_t result = uint8_t(packet.payload.at(2));
-            emit eventLog(QString("COMMAND_ACK command=%1 result=%2").arg(command).arg(commandResultName(result)), result == 0 ? "info" : "warn");
+            const uint8_t ackTarget = readLe<uint8_t>(packet.payload, 8); // 0 = broadcast / MAVLink1 without extension
+            if (ackTarget == 0 || ackTarget == groundSystem_) {
+                emit eventLog(QString("COMMAND_ACK %1 -> %2").arg(commandName(command), commandResultName(result)), result == 0 ? "info" : "warn");
+            }
         } else if (packet.msgId == 253 && packet.payload.size() >= 51) {
             const uint8_t severity = uint8_t(packet.payload.at(0));
             QByteArray rawText = packet.payload.mid(1, 50);
@@ -1479,7 +1203,7 @@ private:
         payload[31] = char(targetComponent_);
         payload[32] = char(0);
         writePacket(76, payload);
-        emit eventLog(QString("Sent COMMAND_LONG %1").arg(command), "tx");
+        emit eventLog(QString("Sent COMMAND_LONG %1").arg(commandName(command)), "tx");
     }
 
     void setMode(uint32_t customMode)
@@ -1559,6 +1283,17 @@ private:
         writePacket(66, payload);
     }
 
+    QString commandName(uint16_t command) const
+    {
+        switch (command) {
+        case MavCmdNavReturnToLaunch: return "RETURN_TO_LAUNCH";
+        case MavCmdNavLand: return "LAND";
+        case MavCmdNavTakeoff: return "TAKEOFF";
+        case MavCmdComponentArmDisarm: return "ARM_DISARM";
+        default: return QString::number(command);
+        }
+    }
+
     QString commandResultName(uint8_t result) const
     {
         switch (result) {
@@ -1601,6 +1336,21 @@ private:
             }
         }
 
+        if (serial_->isOpen() && heartbeatAccepted_ && protocol_ == LinkProtocol::Mavlink) {
+            const bool lost = lastHeartbeatAge < 0 || lastHeartbeatAge > heartbeatLostMs_;
+            if (lost != heartbeatLost_) {
+                heartbeatLost_ = lost;
+                if (lost) {
+                    emit statusChanged("HEARTBEAT LOST", "status-disconnected");
+                    emit eventLog(QString("No vehicle heartbeat for %1 s. Radio link lost or vehicle powered off.")
+                                      .arg(heartbeatLostMs_ / 1000), "warn");
+                } else {
+                    emit statusChanged("Connected", "status-connected");
+                    emit eventLog("Vehicle heartbeat restored.", "info");
+                }
+            }
+        }
+
         data["health"] = health;
         data["style"] = style;
         data["rx_rate"] = QString("%1 B/s").arg(bytesReceivedThisSecond_);
@@ -1633,6 +1383,8 @@ private:
     const int maxReconnectAttempts_ = 5;
     bool heartbeatSeen_ = false;
     bool heartbeatAccepted_ = false;
+    bool heartbeatLost_ = false;
+    const qint64 heartbeatLostMs_ = 5000;
     bool mspAccepted_ = false;
     bool wantedOpen_ = true;
     LinkProtocol protocol_ = LinkProtocol::Unknown;
@@ -1812,6 +1564,7 @@ QPushButton#btnRTH {
     color: #DCEAFF;
 }
 QPushButton#btnGoToTarget { background: #10B981; }
+QPushButton#btnDisarm { background: #7F1D1D; border: 1px solid #B91C1C; }
 QPushButton#btnClearHistory { background: #475569; }
 QPushButton:hover:!disabled {
     border: 1px solid #A7C7FF;
@@ -1921,7 +1674,9 @@ QTabBar::tab:selected {
         btnLand_->setObjectName("btnLand");
         btnRth_ = new QPushButton("RETURN HOME");
         btnRth_->setObjectName("btnRTH");
-        for (QPushButton *button : {btnArm_, btnTakeoff_, btnLand_, btnRth_}) {
+        btnDisarm_ = new QPushButton("DISARM");
+        btnDisarm_->setObjectName("btnDisarm");
+        for (QPushButton *button : {btnArm_, btnTakeoff_, btnLand_, btnRth_, btnDisarm_}) {
             button->setMinimumHeight(44);
             button->setMaximumHeight(46);
             button->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -1931,6 +1686,7 @@ QTabBar::tab:selected {
         commandLayout->addWidget(btnTakeoff_, 0, 1);
         commandLayout->addWidget(btnLand_, 1, 0);
         commandLayout->addWidget(btnRth_, 1, 1);
+        commandLayout->addWidget(btnDisarm_, 2, 0, 1, 2);
         commandLayout->setColumnStretch(0, 1);
         commandLayout->setColumnStretch(1, 1);
 
@@ -2005,7 +1761,7 @@ QTabBar::tab:selected {
         telemetryLayout->setVerticalSpacing(10);
 
         valueBattery_ = makeValueLabel("--");
-        valueAltitude_ = makeValueLabel("L:-- R:--");
+        valueAltitude_ = makeValueLabel("--");
         valueGps_ = makeValueLabel("--");
         valueAttitude_ = makeValueLabel("Roll:--, Pitch:--, Yaw:--");
         valueSpeed_ = makeValueLabel("--");
@@ -2013,7 +1769,7 @@ QTabBar::tab:selected {
 
         telemetryLayout->addWidget(makeFieldLabel("Battery"), 0, 0);
         telemetryLayout->addWidget(valueBattery_, 0, 1);
-        telemetryLayout->addWidget(makeFieldLabel("Aux / Alt"), 0, 2);
+        telemetryLayout->addWidget(makeFieldLabel("Radio / Aux"), 0, 2);
         telemetryLayout->addWidget(valueAltitude_, 0, 3);
         telemetryLayout->addWidget(makeFieldLabel("GPS"), 1, 0);
         telemetryLayout->addWidget(valueGps_, 1, 1);
@@ -2036,6 +1792,7 @@ QTabBar::tab:selected {
         textPositionHistory_->setReadOnly(true);
         textPositionHistory_->setPlaceholderText("Position stream will appear here when GPS telemetry is available.");
         textPositionHistory_->setMinimumHeight(120);
+        textPositionHistory_->document()->setMaximumBlockCount(2000);
         btnClearHistory_ = new QPushButton("CLEAR HISTORY");
         btnClearHistory_->setObjectName("btnClearHistory");
         btnClearHistory_->setMinimumWidth(140);
@@ -2052,6 +1809,7 @@ QTabBar::tab:selected {
         textEventLog_->setObjectName("eventLog");
         textEventLog_->setReadOnly(true);
         textEventLog_->setMinimumHeight(120);
+        textEventLog_->document()->setMaximumBlockCount(2000);
         textEventLog_->setPlaceholderText("MAVLink ACK/STATUSTEXT and MSP serial events will appear here.");
         eventLayout->addWidget(textEventLog_);
 
@@ -2076,8 +1834,11 @@ QTabBar::tab:selected {
         tabs->addTab(chartPage, "Attitude Chart");
         root->addWidget(tabs, 1);
 
+        const QSettings settings;
+        comboCom_->setEditText(settings.value("serial/port").toString());
         refreshComPorts(false);
-        setControlsEnabled(true);
+        comboBaud_->setCurrentText(settings.value("serial/baud", "115200").toString());
+        setControlsEnabled(false);
     }
 
     void connectSignals()
@@ -2096,6 +1857,7 @@ QTabBar::tab:selected {
         connect(btnTakeoff_, &QPushButton::clicked, this, &DroneControlApp::onTakeoffClicked);
         connect(btnLand_, &QPushButton::clicked, this, &DroneControlApp::onLandClicked);
         connect(btnRth_, &QPushButton::clicked, this, &DroneControlApp::onRthClicked);
+        connect(btnDisarm_, &QPushButton::clicked, this, &DroneControlApp::onDisarmClicked);
         connect(btnGoToTarget_, &QPushButton::clicked, this, &DroneControlApp::onGotoClicked);
         connect(btnClearHistory_, &QPushButton::clicked, textPositionHistory_, &QTextEdit::clear);
 
@@ -2114,6 +1876,7 @@ QTabBar::tab:selected {
         btnTakeoff_->setEnabled(enabled);
         btnLand_->setEnabled(enabled);
         btnRth_->setEnabled(enabled);
+        btnDisarm_->setEnabled(enabled);
         btnGoToTarget_->setEnabled(enabled);
     }
 
@@ -2187,10 +1950,14 @@ private slots:
         }
 
         bool ok = false;
-        int baud = comboBaud_->currentText().trimmed().toInt(&ok);
-        if (!ok) {
-            baud = 57600;
+        const int baud = comboBaud_->currentText().trimmed().toInt(&ok);
+        if (!ok || baud <= 0) {
+            onStatusChanged("Invalid baud rate", "status-warning");
+            return;
         }
+        QSettings settings;
+        settings.setValue("serial/port", port);
+        settings.setValue("serial/baud", baud);
         connectInProgress_ = true;
         btnConnect_->setText("Cancel");
         onStatusChanged("Opening serial link...", "status-warning");
@@ -2227,7 +1994,7 @@ private slots:
         connected_ = false;
         connectInProgress_ = false;
         btnConnect_->setText("Connect");
-        setControlsEnabled(true);
+        setControlsEnabled(false);
     }
 
     void onConnectionLost()
@@ -2295,18 +2062,55 @@ private slots:
         textEventLog_->append(QString("[%1] %2  %3").arg(ts, prefix, text));
     }
 
+    bool confirm(const QString &title, const QString &text)
+    {
+        return QMessageBox::warning(this, title, text, QMessageBox::Yes | QMessageBox::Cancel, QMessageBox::Cancel)
+            == QMessageBox::Yes;
+    }
+
+    // Returns NaN and shows a warning when the altitude field is not a sane relative altitude.
+    double readAltitude(double fallback)
+    {
+        const QString text = inputTargetAlt_->text().trimmed();
+        if (text.isEmpty()) {
+            return fallback;
+        }
+        bool ok = false;
+        const double alt = text.toDouble(&ok);
+        if (!ok || alt <= 0.0 || alt > MaxAltitudeM) {
+            onStatusChanged(QString("Altitude must be between 0 and %1 m").arg(MaxAltitudeM), "status-warning");
+            return std::nan("");
+        }
+        return alt;
+    }
+
     void onArmClicked()
     {
+        if (!confirm("Arm motors", "Arm the motors? Propellers may start spinning.")) {
+            return;
+        }
         QMetaObject::invokeMethod(worker_, [worker = worker_]() {
             worker->arm();
         }, Qt::QueuedConnection);
     }
 
+    void onDisarmClicked()
+    {
+        if (!confirm("Disarm motors", "Disarm now? If the drone is airborne it will fall.")) {
+            return;
+        }
+        QMetaObject::invokeMethod(worker_, [worker = worker_]() {
+            worker->disarm();
+        }, Qt::QueuedConnection);
+    }
+
     void onTakeoffClicked()
     {
-        bool ok = false;
-        const double alt = inputTargetAlt_->text().toDouble(&ok);
-        QMetaObject::invokeMethod(worker_, [worker = worker_, alt = ok ? alt : 5.0]() {
+        const double alt = readAltitude(5.0);
+        if (std::isnan(alt) || !confirm("Take off", QString("Switch to GUIDED and take off to %1 m?").arg(alt))) {
+            return;
+        }
+        QMetaObject::invokeMethod(worker_, [worker = worker_, alt]() {
             worker->takeoff(alt);
         }, Qt::QueuedConnection);
     }
@@ -2329,12 +2133,19 @@ private slots:
     {
         bool latOk = false;
         bool lonOk = false;
-        bool altOk = false;
         const double lat = inputTargetLat_->text().toDouble(&latOk);
         const double lon = inputTargetLon_->text().toDouble(&lonOk);
-        const double alt = inputTargetAlt_->text().toDouble(&altOk);
-        if (!latOk || !lonOk || !altOk) {
-            onStatusChanged("Enter a valid latitude, longitude and altitude", "status-warning");
+        if (!latOk || !lonOk || lat < -90.0 || lat > 90.0 || lon < -180.0 || lon > 180.0
+            || (lat == 0.0 && lon == 0.0)) {
+            onStatusChanged("Enter a valid latitude (-90..90) and longitude (-180..180)", "status-warning");
+            return;
+        }
+        if (inputTargetAlt_->text().trimmed().isEmpty()) {
+            onStatusChanged("Enter a target altitude", "status-warning");
+            return;
+        }
+        const double alt = readAltitude(0.0);
+        if (std::isnan(alt)) {
             return;
         }
 
@@ -2344,6 +2155,7 @@ private slots:
     }
 
 private:
+    static constexpr double MaxAltitudeM = 120.0; // common legal ceiling for small UAVs; adjust to local rules
     MavlinkWorker *worker_ = nullptr;
     QThread *workerThread_ = nullptr;
     bool connected_ = false;
@@ -2356,6 +2168,7 @@ private:
     QPushButton *btnTakeoff_ = nullptr;
     QPushButton *btnLand_ = nullptr;
     QPushButton *btnRth_ = nullptr;
+    QPushButton *btnDisarm_ = nullptr;
     QPushButton *btnGoToTarget_ = nullptr;
     QPushButton *btnClearHistory_ = nullptr;
     QLabel *labelStatus_ = nullptr;
@@ -2384,6 +2197,8 @@ private:
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
+    QApplication::setOrganizationName("AeroLink");
+    QApplication::setApplicationName("AeroLinkGroundStation"); // names the settings and tile cache locations
 
     try {
         DroneControlApp window;

@@ -136,6 +136,10 @@ Vi du:
 -----------------------------
 Luu y an toan:
 Chi bam cac nut dieu khien khi drone da o khu vuc an toan, co propeller safety va da test link.
+- Cac nut chi bam duoc khi da ket noi.
+- ARM, DISARM, TAKE OFF deu hien hop xac nhan truoc khi gui lenh.
+- O Flight Mode hien mode + trang thai ARMED/DISARMED lay tu HEARTBEAT.
+- Neu mat HEARTBEAT qua 5 giay (radio mat song), status hien "HEARTBEAT LOST" va log canh bao.
 
 8.1. ARM
 
@@ -156,8 +160,13 @@ Sau khi bam ARM:
 
 Gui lenh cat canh.
 
-Altitude lay tu o Altitude trong AUTONOMOUS TARGET.
-Neu o do trong hoac khong hop le, app dung mac dinh 5m.
+App tu chuyen sang mode GUIDED truoc (ArduCopter chi nhan TAKEOFF o GUIDED).
+Altitude lay tu o Altitude trong AUTONOMOUS TARGET (do cao tuong doi so voi home).
+Neu o do trong, app dung mac dinh 5m. Gia tri ngoai 0..120m bi tu choi.
+
+8.2b. DISARM
+
+Tat dong co ngay lap tuc. Neu drone dang bay, drone se roi. Chi dung khi khan cap hoac da ha canh.
 
 Dieu kien thuong can:
 - Drone da arm.

@@ -2,6 +2,7 @@ from pymavlink import mavutil
 import time
 import math
 import random
+import sys
 
 # =========================
 # CONFIG
@@ -9,7 +10,7 @@ import random
 
 # Python gửi vào COM này
 # App Qt mở cổng COM còn lại trong cặp COM ảo
-PORT = "COM7"
+PORT = sys.argv[1] if len(sys.argv) > 1 else "COM7"  # python test_mavlink.py COM5
 BAUD = 115200
 
 # Tọa độ giả lập gần TP.HCM / Tân Sơn Nhất

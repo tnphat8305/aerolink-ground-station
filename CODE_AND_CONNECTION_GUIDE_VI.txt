@@ -49,7 +49,10 @@ Code co cac ham:
 
 - MavParser::push()
   Nhan byte raw tu serial, ghep thanh MAVLink packet hop le.
-  Ho tro MAVLink v1 va v2 khi nhan.
+  Ho tro MAVLink v1 va v2 khi nhan (tu bu cac byte 0 bi cat cuoi payload v2).
+  Frame sai CRC chi bo 1 byte roi dong bo lai, khong lam mat packet that phia sau.
+
+  Cac ham nay nam trong mavlink_protocol.h, test o tests/test_protocol.cpp.
 
 - makeV1Packet()
   Tao MAVLink v1 packet de gui len flight controller.
@@ -242,9 +245,8 @@ LoRa co bang thong thap va do tre cao hon telemetry radio/USB, nen:
 ------------------------
 Nen bo sung them:
 - Safety switch: Monitor Only / Command Enabled.
-- Confirm dialog cho ARM, TAKEOFF, LAND, RTH.
+- Confirm dialog cho LAND, RTH (ARM, DISARM, TAKEOFF da co).
 - Auto detect baud.
-- Save cau hinh COM/baud lan cuoi.
 - Bang message inspector hien raw MAVLink message.
 - CRC fail counter trong parser.
 - Export log ra file.
